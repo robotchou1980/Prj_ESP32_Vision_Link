@@ -1,0 +1,106 @@
+如何在Arduino IDE中，新增ESP32系列開發板
+
+先來安裝函式庫吧，要讓TTGO T-Display發揮LCD和按鈕功能，分別需要安裝TFT-eSPI和Button2兩個函式庫，都可以在程式管理員中找到。
+
+官方建議LCD是用TFT-eSPI這個強大的函式庫來驅動，安裝好函式庫後，要做一點點小設定，進到「\Documents\Arduino\libraries\TFT_eSPI」目錄，打開「User_Setup_Select.h」檔案。
+
+「#include <User_Setup.h>」前面加上//，把這行註解掉。
+
+「#include <User_Setups/Setup25_TTGO_T_Display.h>」這行就要取消註解，表示我們要用TTGO T-Display所搭配的LCD。
+
+再來我們就能開始使用TTGO T-Display寫程式囉！
+
+開發板選擇「ESP32 Dev Module」。
+
+傑森寫了一支簡單的測試程式，裡面用LCD顯示文字，顯示彩色圖檔，再加上按鈕的互動。
+
+因為TTGO T-Display和之前傑森介紹過的M5StickC非常相似，同樣是ESP32，也是用TFT_eSPI函式庫，所以在程式的寫法上蠻像的，大家可以參考一下另一篇文章：
+
+內建TFT LCD的ESP32迷你開發板：M5StickC測試報告
+
+img1和img2是將兩張240x135的彩色圖檔，要先轉成C的陣列，可以透過一些網站或軟體來完成。傑森建議以下網站就蠻好用的了。
+
+http://www.rinkydinkelectronics.com/t_imageconverter565.php
+
+因為檔案都不小，所以就分別用兩個.h檔儲存，再include進來。在顯示文字或是圖檔很簡單，也因為都是使用TFT_eSPI函式庫，所以寫法和M5StickC幾乎一樣，大家可以回頭參考看看。
+
+至於內建的按鍵A和按鍵B，透過Button2的函式庫，變得很容易使用。按鍵A是PIN 0，按鍵B是PIN 35。
+
+這個程式包含了LCD顯示文字、圖片，加上兩個按鍵的控制，接下來就把它當作是一般的ESP32開發板來用吧，肯定很有趣的哦！
+
+
+<Arduino Demo>
+#include <TFT_eSPI.h>        //LCD函式庫
+#include <Button2.h>        //Button2函式庫
+
+TFT_eSPI tft = TFT_eSPI(); 
+
+#define BUTTON_A_PIN  0  //按鍵A，PIN 0
+#define BUTTON_B_PIN  35 //按鍵B，PIN 35
+Button2 buttonA = Button2(BUTTON_A_PIN);
+Button2 buttonB = Button2(BUTTON_B_PIN);
+
+#include "img1.h"   //載入兩個圖檔，已轉C Array
+#include "img2.h"
+
+void setup()
+{
+  tft.begin();               // 初始化LCD
+  tft.setRotation(1);  // landscape
+  tft.fillScreen(TFT_BLACK); // 用全黑清除螢幕
+
+  //顯示文字
+  
+  tft.setFreeFont(&FreeSerifBold24pt7b);  //設定字型，請參考Adafruit GFX函式庫的資料
+                                          //https://learn.adafruit.com/adafruit-gfx-graphics-library/using-fonts
+  tft.setCursor(30, 60);
+  tft.setTextColor(TFT_WHITE);
+  tft.setTextSize(1);
+  tft.printf("JMaker");
+  tft.setFreeFont(&FreeSerifBold12pt7b);
+  tft.setCursor(30, 95);
+  tft.setTextColor(TFT_YELLOW);
+  tft.setTextSize(1);
+  tft.printf("jmaker.com.tw");
+  delay(2500);
+
+  tft.setSwapBytes(true);
+  tft.pushImage(0, 0, 240, 135, img1);  //顯示圖檔img1
+
+  buttonA.setPressedHandler(press);   //建立A按鍵按下Pressed的事件
+  buttonA.setReleasedHandler(release);//建立A按鍵放開Released的事件
+  buttonB.setPressedHandler(press);   //建立B按鍵按下Pressed的事件
+  buttonB.setReleasedHandler(release);//建立B按鍵放開Released的事件
+}
+
+void loop()
+{
+  buttonA.loop();  //重複按鍵的觸發設定
+  buttonB.loop();
+}
+
+void press(Button2& btn) {
+    if (btn == buttonA) {   //按下A按鍵，更換圖片
+      tft.pushImage(0, 0, 240, 135, img2);
+    } else if (btn == buttonB) {  //按下B按鍵，顯示文字
+      tft.fillScreen(TFT_BLACK); // 用全黑清除螢幕
+      tft.setFreeFont(&FreeSerifBold24pt7b);
+      tft.setCursor(30, 60);
+      tft.setTextColor(TFT_WHITE);
+      tft.setTextSize(1);
+      tft.printf("JMaker");
+      tft.setFreeFont(&FreeSerifBold12pt7b);
+      tft.setCursor(30, 95);
+      tft.setTextColor(TFT_YELLOW);
+      tft.setTextSize(1);
+      tft.printf("jmaker.com.tw");
+    }
+}
+
+void release(Button2& btn) {
+    if (btn == buttonA) {          //放開按鍵A，恢復顯示圖片
+      tft.pushImage(0, 0, 240, 135, img1);
+    } else if (btn == buttonB) {   //放開按鍵A，恢復顯示圖片
+      tft.pushImage(0, 0, 240, 135, img1);
+    }
+}

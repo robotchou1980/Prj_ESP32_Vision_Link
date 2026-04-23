@@ -45,6 +45,7 @@ private:
     bool running;
     static const size_t JPEG_BUFFER_SIZE = 32 * 1024;
 
+public:
     /**
      * @brief Handle GET /capture request
      */
@@ -56,11 +57,14 @@ private:
     void handleRoot();
 
     /**
+     * @brief Handle GET /status request (diagnostic)
+     */
+    void handleStatus();
+
+    /**
      * @brief Handle not found routes
      */
     void handleNotFound();
-
-public:
     /**
      * @brief Constructor
      * @param cameraService Dependency injection for camera service

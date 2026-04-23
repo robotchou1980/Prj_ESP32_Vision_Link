@@ -2,6 +2,20 @@
 
 Production-quality embedded system using TDD, SOLID principles, and Pytest for host-side testing.
 
+## 📚 Documentation
+
+### SENDER Development
+- **[SENDER Quick Start](SENDER_QUICKSTART.md)** - 5-minute setup guide
+- **[SENDER Development Guide](SENDER_DEVELOPMENT.md)** - Complete architecture and implementation
+- **[SOLID Principles Deep Dive](SENDER_SOLID_PRINCIPLES.md)** - How SOLID principles are applied
+
+### Testing
+- **Camera Tests**: `tests/test_sender_camera.py` (32 tests)
+- **HTTP Server Tests**: `tests/test_sender_http.py` (29 tests)
+- **WiFi Manager Tests**: `tests/test_sender_wifi.py` (30 tests)
+- **Integration Tests**: `tests/test_sender_integration.py` (26 tests)
+- **Total**: ✅ **117 tests passing**
+
 ## Architecture
 
 ### System Overview

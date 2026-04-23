@@ -1,5 +1,6 @@
 #include "http_server_service.h"
 #include <WebServer.h>
+#include <WiFi.h>
 #include <Arduino.h>
 
 // Global WebServer instance for callback functions
@@ -16,6 +17,12 @@ void handleCaptureCallback() {
 void handleRootCallback() {
     if (g_httpService) {
         g_httpService->handleRoot();
+    }
+}
+
+void handleStatusCallback() {
+    if (g_httpService) {
+        g_httpService->handleStatus();
     }
 }
 
@@ -55,6 +62,7 @@ bool ESP32HttpServerService::begin(uint16_t port) {
     // Register request handlers
     g_server->on("/", HTTP_GET, handleRootCallback);
     g_server->on("/capture", HTTP_GET, handleCaptureCallback);
+    g_server->on("/status", HTTP_GET, handleStatusCallback);
     g_server->onNotFound(handleNotFoundCallback);
 
     g_server->begin();
@@ -121,7 +129,7 @@ void ESP32HttpServerService::handleCapture() {
     s_totalRequests++;
     uint32_t startTime = millis();
 
-    // Allocate buffer for JPEG (avoid stack allocation)
+    // Allocate buffer for JPEG
     uint8_t* jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
     if (!jpegBuffer) {
         Serial.println("[ERROR] Failed to allocate JPEG buffer");
@@ -141,16 +149,10 @@ void ESP32HttpServerService::handleCapture() {
         return;
     }
 
-    // Send JPEG response
-    g_server->sendHeader("Content-Type", "image/jpeg");
-    g_server->sendHeader("Content-Length", String(jpegSize));
-    g_server->send(200, "image/jpeg", "");
-    
-    // Send image data in chunks
-    for (size_t i = 0; i < jpegSize; i += 1024) {
-        size_t chunkSize = (jpegSize - i) > 1024 ? 1024 : (jpegSize - i);
-        g_server->client().write(&jpegBuffer[i], chunkSize);
-    }
+    // Send JPEG using proper binary response
+    g_server->setContentLength(jpegSize);
+    g_server->send(200, "image/jpeg");
+    g_server->client().write((const uint8_t *)jpegBuffer, jpegSize);
 
     s_successfulCaptures++;
     s_lastResponseTime = millis() - startTime;
@@ -165,6 +167,35 @@ void ESP32HttpServerService::handleNotFound() {
 
     s_totalRequests++;
     g_server->send(404, "text/plain", "Not Found");
+}
+
+void ESP32HttpServerService::handleStatus() {
+    if (!g_server) return;
+
+    s_totalRequests++;
+    
+    // Build JSON status response
+    String json = "{";
+    json += "\"status\":\"ok\",";
+    json += "\"uptime_ms\":" + String(millis()) + ",";
+    json += "\"total_requests\":" + String(s_totalRequests) + ",";
+    json += "\"successful_captures\":" + String(s_successfulCaptures) + ",";
+    json += "\"failed_captures\":" + String(s_failedCaptures) + ",";
+    json += "\"last_response_time_ms\":" + String(s_lastResponseTime) + ",";
+    
+    // Memory info - FIXED: prevent integer overflow
+    uint32_t freeHeap = esp_get_free_heap_size();
+    uint32_t totalHeap = ESP.getHeapSize();
+    uint32_t usedHeap = (totalHeap > freeHeap) ? (totalHeap - freeHeap) : 0;
+    json += "\"heap_free\":" + String(freeHeap) + ",";
+    json += "\"heap_used\":" + String(usedHeap) + ",";
+    json += "\"heap_total\":" + String(totalHeap) + ",";
+    
+    // WiFi info
+    json += "\"rssi\":" + String(WiFi.RSSI());
+    json += "}";
+    
+    g_server->send(200, "application/json", json);
 }
 
 ESP32HttpServerService::ServerStats ESP32HttpServerService::getStats() const {

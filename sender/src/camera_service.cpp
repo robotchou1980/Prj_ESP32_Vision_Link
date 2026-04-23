@@ -56,21 +56,42 @@ void ESP32CameraService::configPins() {
     config.pin_xclk = XCLK_GPIO_NUM;
     config.pin_sccb_sda = SIOD_GPIO_NUM;
     config.pin_sccb_scl = SIOC_GPIO_NUM;
-    config.xclk_freq_hz = 20000000;
+    config.xclk_freq_hz = 10000000;  // Reduced from 20MHz for stability
     config.pixel_format = PIXFORMAT_JPEG;
     config.frame_size = FRAMESIZE_QVGA;
     config.jpeg_quality = 10;
-    config.fb_count = 1;
+    config.fb_count = 2;  // Changed from 1 to 2 for better stability
     config.fb_location = CAMERA_FB_IN_PSRAM;
     config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+
+    Serial.println("[DEBUG] Camera config:");
+    Serial.printf("  XCLK: GPIO%d @ 10MHz\n", XCLK_GPIO_NUM);
+    Serial.printf("  PWDN: GPIO%d\n", PWDN_GPIO_NUM);
+    Serial.printf("  Frame size: QVGA (320x240)\n");
+    Serial.printf("  JPEG Quality: 10\n");
+    Serial.printf("  Frame buffers: 2 in PSRAM\n");
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
         Serial.printf("[ERROR] Camera init failed with error 0x%x\n", err);
+        if (err == ESP_ERR_CAMERA_NOT_DETECTED) {
+            Serial.println("[ERROR] Camera NOT DETECTED - Check hardware connection!");
+        } else if (err == ESP_ERR_NO_MEM) {
+            Serial.println("[ERROR] Not enough memory for camera");
+        }
         return;
     }
 
+    Serial.println("[INFO] Camera hardware initialized");
+
     sensor_t * s = esp_camera_sensor_get();
+    if (!s) {
+        Serial.println("[ERROR] Failed to get sensor");
+        return;
+    }
+    
+    Serial.println("[INFO] Sensor found, configuring...");
+    
     s->set_brightness(s, 0);
     s->set_contrast(s, 0);
     s->set_saturation(s, 0);
@@ -78,7 +99,7 @@ void ESP32CameraService::configPins() {
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);
-    s->set_expose_ctrl(s, 1);
+    s->set_exposure_ctrl(s, 1);
     s->set_aec2(s, 0);
     s->set_ae_level(s, 0);
     s->set_aec_value(s, 300);
@@ -93,6 +114,8 @@ void ESP32CameraService::configPins() {
     s->set_vflip(s, 0);
     s->set_dcw(s, 1);
     s->set_colorbar(s, 0);
+    
+    Serial.println("[INFO] Sensor configured successfully");
 }
 
 void ESP32CameraService::configFrame() {
@@ -110,7 +133,27 @@ bool ESP32CameraService::begin() {
     }
 
     Serial.println("[INFO] Initializing camera...");
+    
+    // Check PSRAM
+    if (psramFound()) {
+        Serial.printf("[INFO] PSRAM found: %u bytes\n", ESP.getPsramSize());
+    } else {
+        Serial.println("[WARNING] PSRAM not found - using internal RAM");
+    }
+    
     configPins();
+    
+    // Give camera time to stabilize after init
+    delay(1000);
+    
+    // Test first capture
+    camera_fb_t * testFb = esp_camera_fb_get();
+    if (!testFb) {
+        Serial.println("[ERROR] First capture test failed - camera not responding");
+        return false;
+    }
+    Serial.printf("[INFO] First test capture successful: %u bytes\n", testFb->len);
+    esp_camera_fb_return(testFb);
 
     initialized = true;
     Serial.println("[INFO] Camera initialized successfully");
@@ -129,9 +172,21 @@ size_t ESP32CameraService::captureJpeg(uint8_t* buffer, size_t maxSize) {
         return 0;
     }
 
+    if (!fb->buf) {
+        Serial.println("[ERROR] Frame buffer data is null");
+        esp_camera_fb_return(fb);
+        return 0;
+    }
+
     size_t captureSize = fb->len;
+    if (captureSize == 0) {
+        Serial.println("[ERROR] Frame has zero size");
+        esp_camera_fb_return(fb);
+        return 0;
+    }
+
     if (captureSize > maxSize) {
-        Serial.printf("[WARNING] Frame size %d exceeds buffer %d, truncating\n", captureSize, maxSize);
+        Serial.printf("[WARNING] Frame size %u exceeds buffer %u, truncating\n", captureSize, maxSize);
         captureSize = maxSize;
     }
 

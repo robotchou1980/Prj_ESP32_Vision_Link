@@ -36,6 +36,15 @@ public:
      * @brief Disconnect from WiFi
      */
     virtual void disconnect() = 0;
+
+    /**
+     * @brief Start WiFi in AP (Access Point) mode
+     * @param ssid AP SSID name
+     * @param password AP password (min 8 characters for WPA2)
+     * @param channel WiFi channel (1-13)
+     * @return true if AP started successfully
+     */
+    virtual bool startAP(const char* ssid, const char* password, uint8_t channel = 1) = 0;
 };
 
 /**
@@ -55,6 +64,7 @@ public:
     bool isConnected() const override;
     std::string getLocalIP() const override;
     void disconnect() override;
+    bool startAP(const char* ssid, const char* password, uint8_t channel = 1) override;
 };
 
 #endif  // WIFI_MANAGER_H

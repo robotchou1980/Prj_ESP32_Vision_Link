@@ -39,13 +39,22 @@ static uint32_t s_failedCaptures = 0;
 static uint32_t s_lastResponseTime = 0;
 
 ESP32HttpServerService::ESP32HttpServerService(ICameraService* cameraService)
-    : camera(cameraService), port(80), running(false) {
+    : camera(cameraService), port(80), running(false), jpegCacheSize(0), 
+      lastCaptureTime(0), cacheValid(false) {
+    jpegCacheBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
+    if (!jpegCacheBuffer) {
+        Serial.println("[ERROR] Failed to allocate JPEG cache buffer");
+    }
     if (!camera) {
         Serial.println("[ERROR] Camera service is null");
     }
 }
 
 ESP32HttpServerService::~ESP32HttpServerService() {
+    if (jpegCacheBuffer) {
+        free(jpegCacheBuffer);
+        jpegCacheBuffer = nullptr;
+    }
     end();
 }
 
@@ -128,38 +137,53 @@ void ESP32HttpServerService::handleCapture() {
 
     s_totalRequests++;
     uint32_t startTime = millis();
+    uint32_t currentTime = millis();
+    bool useCache = false;
+    size_t jpegSize = 0;
 
-    // Allocate buffer for JPEG
-    uint8_t* jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
-    if (!jpegBuffer) {
-        Serial.println("[ERROR] Failed to allocate JPEG buffer");
-        s_failedCaptures++;
-        g_server->send(500, "text/plain", "Memory allocation failed");
-        return;
-    }
-
-    // Capture image
-    size_t jpegSize = camera->captureJpeg(jpegBuffer, JPEG_BUFFER_SIZE);
-    
-    if (jpegSize == 0) {
-        Serial.println("[ERROR] Failed to capture image");
-        s_failedCaptures++;
-        g_server->send(500, "text/plain", "Image capture failed");
-        free(jpegBuffer);
-        return;
+    // Check if cache is valid and not expired
+    if (cacheValid && jpegCacheSize > 0 && 
+        (currentTime - lastCaptureTime) < CACHE_EXPIRE_MS) {
+        useCache = true;
+        jpegSize = jpegCacheSize;
+        Serial.printf("[CACHE] Using cached JPEG: %u bytes (age: %lu ms)\n", 
+                      jpegSize, currentTime - lastCaptureTime);
+    } else {
+        // Cache expired or invalid, capture new image
+        if (!cacheValid) {
+            Serial.println("[CAPTURE] Cache invalid, capturing new frame");
+        } else {
+            Serial.printf("[CAPTURE] Cache expired (%lu ms old), capturing new frame\n",
+                          currentTime - lastCaptureTime);
+        }
+        
+        jpegSize = camera->captureJpeg(jpegCacheBuffer, JPEG_BUFFER_SIZE);
+        
+        if (jpegSize == 0) {
+            Serial.println("[ERROR] Failed to capture image");
+            s_failedCaptures++;
+            g_server->send(500, "text/plain", "Image capture failed");
+            return;
+        }
+        
+        jpegCacheSize = jpegSize;
+        lastCaptureTime = currentTime;
+        cacheValid = true;
+        useCache = false;
     }
 
     // Send JPEG using proper binary response
     g_server->setContentLength(jpegSize);
     g_server->send(200, "image/jpeg");
-    g_server->client().write((const uint8_t *)jpegBuffer, jpegSize);
+    g_server->client().write((const uint8_t *)jpegCacheBuffer, jpegSize);
 
     s_successfulCaptures++;
     s_lastResponseTime = millis() - startTime;
 
-    Serial.printf("[INFO] Sent JPEG: %u bytes in %u ms\n", jpegSize, s_lastResponseTime);
-
-    free(jpegBuffer);
+    if (!useCache) {
+        Serial.printf("[INFO] Captured & sent JPEG: %u bytes in %u ms\n", 
+                      jpegSize, s_lastResponseTime);
+    }
 }
 
 void ESP32HttpServerService::handleNotFound() {

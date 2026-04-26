@@ -4,10 +4,11 @@
 #include "wifi_manager.h"
 
 // ============================================================================
-// CONFIGURATION - Update these with your WiFi credentials
+// CONFIGURATION - Update these with your AP settings
 // ============================================================================
-const char* WIFI_SSID = "ABCD";           // Change to your WiFi SSID
-const char* WIFI_PASSWORD = "88888888";   // Change to your WiFi password
+const char* WIFI_SSID = "ESP32-AP";       // AP SSID (visible network name)
+const char* WIFI_PASSWORD = "12345678";   // AP Password (min 8 characters)
+const uint8_t WIFI_CHANNEL = 1;           // WiFi channel (1-13)
 const uint16_t HTTP_PORT = 80;
 
 // ============================================================================
@@ -101,13 +102,13 @@ void setup() {
     Serial.println("\n[INIT] Initializing WiFi Manager...");
     wifiManager = new ESP32WiFiManager();
     
-    // Connect to WiFi
-    Serial.printf("[INIT] Connecting to WiFi: %s\n", WIFI_SSID);
-    if (!wifiManager->connect(WIFI_SSID, WIFI_PASSWORD, 15000)) {
-        Serial.println("[ERROR] Failed to connect to WiFi!");
+    // Start WiFi AP (Access Point mode)
+    Serial.printf("[INIT] Starting WiFi AP: %s\n", WIFI_SSID);
+    if (!wifiManager->startAP(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL)) {
+        Serial.println("[ERROR] Failed to start WiFi AP!");
         Serial.println("[WARNING] Continuing without WiFi...");
     } else {
-        Serial.printf("[OK] WiFi connected! IP: %s\n", wifiManager->getLocalIP().c_str());
+        Serial.printf("[OK] WiFi AP started! IP: %s\n", wifiManager->getLocalIP().c_str());
     }
     
     // Initialize Camera Service
@@ -122,7 +123,8 @@ void setup() {
     }
     
     // Initialize HTTP Server
-    if (cameraService && wifiManager->isConnected()) {
+    if (cameraService) {
+        delay(100);  // Give WiFi/AP time to stabilize
         Serial.println("\n[INIT] Initializing HTTP Server...");
         httpServer = new ESP32HttpServerService(cameraService);
         if (!httpServer->begin(HTTP_PORT)) {
@@ -131,10 +133,14 @@ void setup() {
             httpServer = nullptr;
         } else {
             Serial.printf("[OK] HTTP Server started on port %d\n", HTTP_PORT);
-            Serial.printf("[INFO] Access camera at: http://%s/\n", wifiManager->getLocalIP().c_str());
+            if (wifiManager->isConnected()) {
+                Serial.printf("[INFO] Access camera at: http://%s/\n", wifiManager->getLocalIP().c_str());
+            } else {
+                Serial.println("[WARNING] WiFi not ready yet, HTTP server waiting...");
+            }
         }
     } else {
-        Serial.println("[WARNING] Skipping HTTP Server - WiFi or Camera not available");
+        Serial.println("[WARNING] Skipping HTTP Server - Camera not available");
     }
     
     Serial.println("\n[OK] Setup completed successfully\n");

@@ -1,9 +1,10 @@
 #include "app_controller.h"
+#include "wifi_manager.h"
 #include <Arduino.h>
 #include <string.h>
 
-AppController::AppController(IHttpClientService* httpClient, IDisplayService* display)
-    : httpClient(httpClient), display(display), currentState(AppState::BOOT),
+AppController::AppController(IHttpClientService* httpClient, IDisplayService* display, IWiFiManager* wifiManager)
+    : httpClient(httpClient), display(display), wifiManager(wifiManager), currentState(AppState::BOOT),
       nextState(AppState::BOOT), stateEntryTime(0), retryCount(0),
       jpegSize(0) {
     
@@ -94,13 +95,17 @@ const char* AppController::getLastError() const {
 }
 
 void AppController::handleBoot() {
+    Serial.println("[BOOT] Starting boot sequence...");
+
     // Initialize external devices
-    if (!display || !httpClient) {
+    if (!display || !httpClient || !wifiManager) {
         setError("Invalid dependencies");
+        Serial.println("[ERROR] display, httpClient or wifiManager is null!");
         transitionTo(AppState::ERROR);
         return;
     }
 
+    Serial.println("[BOOT] Initializing display...");
     if (!display->begin()) {
         setError("Display initialization failed");
         transitionTo(AppState::ERROR);
@@ -113,12 +118,27 @@ void AppController::handleBoot() {
 }
 
 void AppController::handleWifiConnect() {
-    // This is a placeholder - WiFi should be connected before calling update()
-    // For production, implement WiFi connection here
-    Serial.printf("[STATE] WiFi connect (assuming already connected)\n");
-    display->showStatus("WiFi Connected");
-    transitionTo(AppState::IDLE);
-    Serial.println("[STATE] WIFI_CONNECT -> IDLE");
+    if (wifiManager->isConnected()) {
+        Serial.printf("[STATE] WiFi already connected, IP: %s\n", wifiManager->getLocalIP().c_str());
+        display->showStatus("WiFi Connected");
+        transitionTo(AppState::IDLE);
+        Serial.println("[STATE] WIFI_CONNECT -> IDLE");
+        return;
+    }
+
+    Serial.printf("[WIFI] Connecting to: %s\n", wifiSsid);
+    display->showSplashScreen("Connecting WiFi...");
+
+    if (wifiManager->connect(wifiSsid, wifiPassword, WIFI_TIMEOUT)) {
+        Serial.printf("[WIFI] Connected! IP: %s\n", wifiManager->getLocalIP().c_str());
+        display->showStatus("WiFi Connected");
+        transitionTo(AppState::IDLE);
+        Serial.println("[STATE] WIFI_CONNECT -> IDLE");
+    } else {
+        setError("WiFi connection failed");
+        transitionTo(AppState::ERROR);
+        Serial.println("[STATE] WIFI_CONNECT -> ERROR");
+    }
 }
 
 void AppController::handleIdle() {
@@ -131,26 +151,23 @@ void AppController::handleIdle() {
 }
 
 void AppController::handleFetchImage() {
-    display->showStatus("Fetching...");
-    
     jpegSize = httpClient->fetchJpeg(serverUrl, jpegBuffer, MAX_JPEG_SIZE, HTTP_TIMEOUT);
-    
+
     if (jpegSize == 0) {
+        display->showStatus(httpClient->getLastErrorMessage().c_str());
         setError(httpClient->getLastErrorMessage().c_str());
         transitionTo(AppState::ERROR);
         Serial.println("[STATE] FETCH_IMAGE -> ERROR");
     } else {
-        transitionTo(AppState::DECODE);
-        Serial.println("[STATE] FETCH_IMAGE -> DECODE");
+        // Skip DECODE state - decoding happens inside displayJpegImage
+        transitionTo(AppState::DISPLAY_IMAGE);
+        Serial.println("[STATE] FETCH_IMAGE -> DISPLAY_IMAGE");
     }
 }
 
 void AppController::handleDecode() {
-    // JPEG decoding happens during display
-    // For now, just transition to display
-    display->showStatus("Decoding...");
+    // Kept for state machine completeness - not used in normal flow
     transitionTo(AppState::DISPLAY_IMAGE);
-    Serial.println("[STATE] DECODE -> DISPLAY_IMAGE");
 }
 
 void AppController::handleDisplay() {
@@ -169,13 +186,22 @@ void AppController::handleDisplay() {
 void AppController::handleError() {
     display->showError(lastError);
     Serial.printf("[STATE] ERROR: %s\n", lastError);
-    
+
+    // If WiFi dropped, go back to WIFI_CONNECT
+    if (!wifiManager->isConnected()) {
+        Serial.println("[STATE] WiFi lost, reconnecting...");
+        retryCount = 0;
+        transitionTo(AppState::WIFI_CONNECT);
+        return;
+    }
+
     if (retryCount < MAX_RETRIES) {
         transitionTo(AppState::RETRY);
         Serial.println("[STATE] ERROR -> RETRY");
     } else {
         // Max retries exceeded - go back to idle but display error briefly
         delay(3000);
+        retryCount = 0;
         transitionTo(AppState::IDLE);
         Serial.println("[STATE] ERROR -> IDLE (max retries exceeded)");
     }

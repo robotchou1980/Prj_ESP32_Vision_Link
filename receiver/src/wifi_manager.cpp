@@ -4,7 +4,9 @@
 
 ESP32WiFiManager::ESP32WiFiManager()
     : connected(false), localIP("") {
-    WiFi.mode(WIFI_STA);
+    // Do NOT call WiFi.mode() here - global constructors run before
+    // the Arduino framework is ready, causing RTCWDT_RTC_RESET crashes.
+    // WiFi is initialized lazily inside connect().
 }
 
 ESP32WiFiManager::~ESP32WiFiManager() {
@@ -19,6 +21,8 @@ bool ESP32WiFiManager::connect(const char* ssid, const char* password, uint32_t 
 
     Serial.printf("[INFO] Connecting to WiFi: %s\n", ssid);
     
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);  // Disable modem sleep - reduces per-packet latency by 50-300ms
     WiFi.begin(ssid, password);
 
     uint32_t startTime = millis();

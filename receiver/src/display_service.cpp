@@ -35,12 +35,18 @@ ST7789DisplayService::~ST7789DisplayService() {
 bool ST7789DisplayService::initTFT() {
     try {
         Serial.println("[DEBUG] Initializing TFT display...");
-        
+
+        // Explicitly turn ON backlight BEFORE tft.begin()
+        // GPIO4 = TFT_BL on TTGO T-Display
+        pinMode(TFT_BL, OUTPUT);
+        digitalWrite(TFT_BL, HIGH);
+        Serial.println("[DEBUG] Backlight ON (GPIO4)");
+        delay(100);
+
         // Use proper initialization sequence with Setup25_TTGO_T_Display
-        delay(100);  // Small delay before init
-        tft.begin();  // Use begin() instead of init()
+        tft.begin();
         Serial.println("[DEBUG] TFT begin() completed");
-        
+
         delay(100);  // Small delay after init
         tft.setRotation(0);  // Portrait mode
         Serial.println("[DEBUG] Rotation set to 0 (portrait)");
@@ -151,12 +157,14 @@ void ST7789DisplayService::showError(const char* errorMsg) {
 void ST7789DisplayService::showStatus(const char* statusMsg) {
     if (!initialized) return;
 
-    // Draw status at bottom with semi-transparent background
+    // Always clear the bottom bar to black before drawing status text
+    // This prevents text appearing on top of red error screens
+    tft.fillRect(0, tft.height() - 18, tft.width(), 18, TFT_BLACK);
     tft.setTextColor(TFT_YELLOW);
     tft.setTextSize(1);
-    tft.setTextDatum(BL_DATUM);  // Bottom left
-    tft.drawString(statusMsg, 5, tft.height() - 5);
-    
+    tft.setTextDatum(BL_DATUM);
+    tft.drawString(statusMsg, 5, tft.height() - 4);
+
     Serial.printf("[STATUS] Display: %s\n", statusMsg);
 }
 

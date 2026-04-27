@@ -3,6 +3,7 @@
 
 #include "http_client_service.h"
 #include "display_service.h"
+#include "wifi_manager.h"
 #include <cstdint>
 
 /**
@@ -33,7 +34,7 @@ public:
     /**
      * @brief Constructor with dependency injection
      */
-    AppController(IHttpClientService* httpClient, IDisplayService* display);
+    AppController(IHttpClientService* httpClient, IDisplayService* display, IWiFiManager* wifiManager);
 
     /**
      * @brief Initialize controller and set up dependencies
@@ -66,6 +67,7 @@ public:
 private:
     IHttpClientService* httpClient;
     IDisplayService* display;
+    IWiFiManager* wifiManager;
     AppState currentState;
     AppState nextState;
     uint32_t stateEntryTime;
@@ -76,11 +78,11 @@ private:
     char wifiPassword[64];
 
     // State machine parameters
-    static const uint32_t FETCH_INTERVAL = 1000;      // 1 second
-    static const uint32_t WIFI_TIMEOUT = 15000;       // 15 seconds
-    static const uint32_t HTTP_TIMEOUT = 5000;        // 5 seconds
+    static const uint32_t FETCH_INTERVAL = 100;        // 100ms breathing room for sender
+    static const uint32_t WIFI_TIMEOUT = 15000;        // 15 seconds
+    static const uint32_t HTTP_TIMEOUT = 10000;        // 10s - server response can take ~5s
     static const uint8_t MAX_RETRIES = 3;
-    static const uint32_t RETRY_DELAY = 5000;         // 5 seconds
+    static const uint32_t RETRY_DELAY = 2000;          // 2 seconds
 
     // JPEG buffer
     uint8_t* jpegBuffer;

@@ -41,12 +41,13 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
     uint32_t startTime = millis();
     size_t bytesReceived = 0;
 
-    HTTPClient http;
-    http.setTimeout(timeoutMs);
+    http.setConnectTimeout(2000);  // 2s connect timeout (fast fail if unreachable)
+    http.setTimeout(timeoutMs);    // Read timeout
 
     Serial.printf("[INFO] Fetching from: %s\n", url);
 
     // Send GET request
+    uint32_t t_begin = millis();
     if (!http.begin(url)) {
         lastErrorMessage = "Failed to begin HTTP request";
         lastHttpCode = -1;
@@ -60,8 +61,10 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
     http.addHeader("User-Agent", "ESP32-HTTPClient");
 
     // Send request
+    uint32_t t_get = millis();
     int httpCode = http.GET();
     lastHttpCode = httpCode;
+    Serial.printf("[TIMING] connect=%ums, server_response=%ums\n", t_get - t_begin, millis() - t_get);
 
     // Check HTTP response code
     if (httpCode != HTTP_CODE_OK) {
@@ -75,11 +78,13 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
         return 0;
     }
 
-    // Get content length
+    // Get content length (-1 means chunked transfer encoding)
     int contentLength = http.getSize();
-    if (contentLength <= 0 || (size_t)contentLength > maxSize) {
+    bool isChunked = (contentLength < 0);
+    Serial.printf("[DEBUG] contentLength=%d, isChunked=%d\n", contentLength, (int)isChunked);
+    if (!isChunked && (size_t)contentLength > maxSize) {
         char errorMsg[64];
-        snprintf(errorMsg, sizeof(errorMsg), "Content size invalid: %d", contentLength);
+        snprintf(errorMsg, sizeof(errorMsg), "Content too large: %d", contentLength);
         lastErrorMessage = errorMsg;
         lastRequestSuccess = false;
         s_failedFetches++;
@@ -87,6 +92,7 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
         http.end();
         return 0;
     }
+    size_t targetSize = isChunked ? 0 : (size_t)contentLength;
 
     // Get WiFi stream
     WiFiClient* stream = http.getStreamPtr();
@@ -98,33 +104,50 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
         return 0;
     }
 
-    // Read data in chunks
+    // Read data - handle both fixed-length and chunked transfer
     uint8_t* readPos = buffer;
     size_t remainingSize = maxSize;
-    uint32_t readTimeout = timeoutMs;
-    uint32_t lastReadTime = millis();
+    uint32_t startReadTime = millis();
+    uint32_t lastDataTime  = 0;             // 0 = no data received yet
+    const uint32_t CHUNKED_EOF_MS = 300;    // 300ms silence after data = EOF
 
-    while (stream->available() && remainingSize > 0) {
-        // Check for timeout during reading
-        if (millis() - lastReadTime > readTimeout) {
-            lastErrorMessage = "Read timeout";
-            lastRequestSuccess = false;
-            s_failedFetches++;
-            http.end();
-            return 0;
+    while (remainingSize > 0) {
+        if (millis() - startReadTime > timeoutMs) {
+            if (bytesReceived == 0) {
+                lastErrorMessage = "Read timeout (no data)";
+                lastRequestSuccess = false;
+                s_failedFetches++;
+                http.end();
+                return 0;
+            }
+            break;  // Timeout but we have data - treat as EOF
         }
 
-        size_t chunkSize = stream->readBytes(readPos, remainingSize > 1024 ? 1024 : remainingSize);
-        if (chunkSize > 0) {
-            readPos += chunkSize;
-            bytesReceived += chunkSize;
-            remainingSize -= chunkSize;
-            lastReadTime = millis();
+        if (stream->available() > 0) {
+            size_t avail = (size_t)stream->available();
+            size_t toRead = avail < remainingSize ? avail : remainingSize;  // never read more than available → no blocking
+            size_t chunkSize = stream->readBytes(readPos, toRead);
+            if (chunkSize > 0) {
+                readPos += chunkSize;
+                bytesReceived += chunkSize;
+                remainingSize -= chunkSize;
+                lastDataTime = millis();
+                // Fixed-length: stop when all expected bytes received
+                if (!isChunked && bytesReceived >= targetSize) break;
+            }
+        } else if (!http.connected()) {
+            // Connection closed = EOF
+            break;
+        } else if (lastDataTime > 0 && (millis() - lastDataTime) >= CHUNKED_EOF_MS) {
+            // Chunked: got data, then 300ms silence = end of body
+            break;
         } else {
-            delay(1);
+            yield(); // Avoid busy-wait while waiting for more data
         }
     }
 
+    // Force-close TCP then end (prevents keep-alive drain loop)
+    stream->stop();
     http.end();
 
     // Validate JPEG format

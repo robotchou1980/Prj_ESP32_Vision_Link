@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <string>
+#include <HTTPClient.h>
 
 /**
  * @brief HTTP client interface for fetching images
@@ -44,6 +45,7 @@ public:
  */
 class ESP32HttpClientService : public IHttpClientService {
 private:
+    HTTPClient http;           // Persistent client for TCP keep-alive / connection reuse
     bool lastRequestSuccess;
     int lastHttpCode;
     std::string lastErrorMessage;

@@ -50,7 +50,7 @@ private:
     int lastHttpCode;
     std::string lastErrorMessage;
     static const size_t MAX_URL_LENGTH = 256;
-    static const size_t JPEG_BUFFER_SIZE = 32 * 1024;  // 32KB
+    static const size_t JPEG_BUFFER_SIZE = 64 * 1024;  // 64KB - safe for no-PSRAM ESP32
 
     /**
      * @brief Validate JPEG header

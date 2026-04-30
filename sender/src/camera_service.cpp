@@ -56,19 +56,19 @@ void ESP32CameraService::configPins() {
     config.pin_xclk = XCLK_GPIO_NUM;
     config.pin_sccb_sda = SIOD_GPIO_NUM;
     config.pin_sccb_scl = SIOC_GPIO_NUM;
-    config.xclk_freq_hz = 10000000;  // Reduced from 20MHz for stability
+    config.xclk_freq_hz = 20000000;  // 20MHz for max performance
     config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size = FRAMESIZE_QVGA;
-    config.jpeg_quality = 10;
-    config.fb_count = 2;  // Changed from 1 to 2 for better stability
+    config.frame_size = FRAMESIZE_VGA;   // 640x480 - good quality, receiver-safe
+    config.jpeg_quality = 8;  // 0-63, lower = higher quality
+    config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
-    config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+    config.grab_mode = CAMERA_GRAB_LATEST;  // Always grab latest frame for speed
 
     Serial.println("[DEBUG] Camera config:");
-    Serial.printf("  XCLK: GPIO%d @ 10MHz\n", XCLK_GPIO_NUM);
+    Serial.printf("  XCLK: GPIO%d @ 20MHz\n", XCLK_GPIO_NUM);
     Serial.printf("  PWDN: GPIO%d\n", PWDN_GPIO_NUM);
-    Serial.printf("  Frame size: QVGA (320x240)\n");
-    Serial.printf("  JPEG Quality: 10\n");
+    Serial.printf("  Frame size: VGA (640x480)\n");
+    Serial.printf("  JPEG Quality: 8 (high quality)\n");
     Serial.printf("  Frame buffers: 2 in PSRAM\n");
 
     esp_err_t err = esp_camera_init(&config);
@@ -92,10 +92,10 @@ void ESP32CameraService::configPins() {
     
     Serial.println("[INFO] Sensor found, configuring...");
     
-    s->set_brightness(s, 0);
-    s->set_contrast(s, 0);
-    s->set_saturation(s, 0);
-    s->set_special_effect(s, 0);
+    s->set_brightness(s, 1);     // +1 slightly brighter
+    s->set_contrast(s, 1);       // +1 more contrast
+    s->set_saturation(s, 2);     // +2 vivid/saturated colors
+    s->set_special_effect(s, 0); // No special effect
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);

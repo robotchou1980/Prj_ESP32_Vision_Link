@@ -43,10 +43,10 @@ private:
     ICameraService* camera;
     uint16_t port;
     bool running;
-    static const size_t JPEG_BUFFER_SIZE = 32 * 1024;
+    static const size_t JPEG_BUFFER_SIZE = 64 * 1024;  // 64KB for VGA JPEG
     
     // JPEG Cache for multi-client optimization
-    static const uint32_t CACHE_EXPIRE_MS = 100;  // Cache expiry time (ms)
+    static const uint32_t CACHE_EXPIRE_MS = 50;  // Cache expiry time (ms) - faster refresh
     uint8_t* jpegCacheBuffer;      // Cached JPEG data
     size_t jpegCacheSize;          // Size of cached JPEG
     uint32_t lastCaptureTime;      // Timestamp of last capture

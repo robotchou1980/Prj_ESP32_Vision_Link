@@ -37,7 +37,7 @@ public:
  */
 class ESP32CameraService : public ICameraService {
 private:
-    static const size_t JPEG_BUFFER_SIZE = 32 * 1024;  // 32KB for JPEG
+    static const size_t JPEG_BUFFER_SIZE = 64 * 1024;  // 64KB for VGA JPEG
     uint8_t* jpegBuffer;
     bool initialized;
 

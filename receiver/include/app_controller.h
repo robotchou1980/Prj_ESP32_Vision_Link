@@ -80,14 +80,14 @@ private:
     // State machine parameters
     static const uint32_t FETCH_INTERVAL = 100;        // 100ms breathing room for sender
     static const uint32_t WIFI_TIMEOUT = 15000;        // 15 seconds
-    static const uint32_t HTTP_TIMEOUT = 10000;        // 10s - server response can take ~5s
+    static const uint32_t HTTP_TIMEOUT = 10000;        // 10s timeout
     static const uint8_t MAX_RETRIES = 3;
     static const uint32_t RETRY_DELAY = 2000;          // 2 seconds
 
     // JPEG buffer
     uint8_t* jpegBuffer;
     size_t jpegSize;
-    static const size_t MAX_JPEG_SIZE = 32 * 1024;    // 32KB
+    static const size_t MAX_JPEG_SIZE = 64 * 1024;    // 64KB - safe for no-PSRAM ESP32
 
     /**
      * @brief State handlers

@@ -93,19 +93,19 @@ void ESP32CameraService::configPins() {
     Serial.println("[INFO] Sensor found, configuring...");
     
     s->set_brightness(s, 1);     // +1 slightly brighter
-    s->set_contrast(s, 1);       // +1 more contrast
-    s->set_saturation(s, 2);     // +2 vivid/saturated colors
+    s->set_contrast(s, 2);       // +2 max contrast (darker darks, brighter brights)
+    s->set_saturation(s, 2);     // +2 max saturation (OV2640 limit)
     s->set_special_effect(s, 0); // No special effect
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);
     s->set_exposure_ctrl(s, 1);
-    s->set_aec2(s, 0);
-    s->set_ae_level(s, 0);
+    s->set_aec2(s, 1);           // Enable AEC2 for better color exposure accuracy
+    s->set_ae_level(s, 1);       // +1 slight over-expose → more saturated colors
     s->set_aec_value(s, 300);
     s->set_gain_ctrl(s, 1);
     s->set_agc_gain(s, 0);
-    s->set_gainceiling(s, (gainceiling_t)0);
+    s->set_gainceiling(s, (gainceiling_t)2); // Gain ceiling x4 → richer colors in low light
     s->set_bpc(s, 0);
     s->set_wpc(s, 1);
     s->set_raw_gma(s, 1);

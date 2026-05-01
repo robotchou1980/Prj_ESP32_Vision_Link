@@ -78,9 +78,9 @@ private:
     char wifiPassword[64];
 
     // State machine parameters
-    static const uint32_t FETCH_INTERVAL = 100;        // 100ms breathing room for sender
+    static const uint32_t FETCH_INTERVAL = 0;          // No delay - max frame rate
     static const uint32_t WIFI_TIMEOUT = 15000;        // 15 seconds
-    static const uint32_t HTTP_TIMEOUT = 10000;        // 10s timeout
+    static const uint32_t HTTP_TIMEOUT = 3000;         // 3s - fail fast on error
     static const uint8_t MAX_RETRIES = 3;
     static const uint32_t RETRY_DELAY = 2000;          // 2 seconds
 

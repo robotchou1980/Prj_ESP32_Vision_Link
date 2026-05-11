@@ -19,6 +19,13 @@ AppController::AppController(IHttpClientService* httpClient, IDisplayService* di
     }
 }
 
+AppController::~AppController() {
+    if (jpegBuffer) {
+        free(jpegBuffer);
+        jpegBuffer = nullptr;
+    }
+}
+
 void AppController::initialize(const char* serverUrl, const char* ssid, const char* password) {
     if (!serverUrl || !ssid || !password) {
         setError("Invalid initialization parameters");
@@ -101,6 +108,12 @@ void AppController::handleBoot() {
     if (!display || !httpClient || !wifiManager) {
         setError("Invalid dependencies");
         Serial.println("[ERROR] display, httpClient or wifiManager is null!");
+        transitionTo(AppState::ERROR);
+        return;
+    }
+
+    if (!jpegBuffer) {
+        setError("JPEG buffer allocation failed");
         transitionTo(AppState::ERROR);
         return;
     }

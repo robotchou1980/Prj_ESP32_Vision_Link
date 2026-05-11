@@ -21,23 +21,15 @@
 #define PCLK_GPIO_NUM     22
 
 ESP32CameraService::ESP32CameraService()
-    : jpegBuffer(nullptr), initialized(false) {
-    jpegBuffer = (uint8_t*)malloc(JPEG_BUFFER_SIZE);
-    if (!jpegBuffer) {
-        Serial.println("[ERROR] Failed to allocate JPEG buffer");
-    }
+    : initialized(false) {
 }
 
 ESP32CameraService::~ESP32CameraService() {
-    if (jpegBuffer) {
-        free(jpegBuffer);
-        jpegBuffer = nullptr;
-    }
     end();
 }
 
-void ESP32CameraService::configPins() {
-    camera_config_t config;
+bool ESP32CameraService::configPins() {
+    camera_config_t config = {};
     config.ledc_channel = LEDC_CHANNEL_0;
     config.ledc_timer = LEDC_TIMER_0;
     config.pin_d7 = Y9_GPIO_NUM;
@@ -58,18 +50,20 @@ void ESP32CameraService::configPins() {
     config.pin_sccb_scl = SIOC_GPIO_NUM;
     config.xclk_freq_hz = 20000000;  // 20MHz for max performance
     config.pixel_format = PIXFORMAT_JPEG;
-    config.frame_size = FRAMESIZE_VGA;   // 640x480 - good quality, receiver-safe
-    config.jpeg_quality = 8;  // 0-63, lower = higher quality
-    config.fb_count = 2;
-    config.fb_location = CAMERA_FB_IN_PSRAM;
+    config.frame_size = FRAMESIZE_QVGA;  // 320x240 - fits receiver and 64KB transfer buffer
+    config.jpeg_quality = 12;            // 0-63, lower = higher quality/larger files
+    config.fb_count = psramFound() ? 2 : 1;
+    config.fb_location = psramFound() ? CAMERA_FB_IN_PSRAM : CAMERA_FB_IN_DRAM;
     config.grab_mode = CAMERA_GRAB_LATEST;  // Always grab latest frame for speed
 
     Serial.println("[DEBUG] Camera config:");
     Serial.printf("  XCLK: GPIO%d @ 20MHz\n", XCLK_GPIO_NUM);
     Serial.printf("  PWDN: GPIO%d\n", PWDN_GPIO_NUM);
-    Serial.printf("  Frame size: VGA (640x480)\n");
-    Serial.printf("  JPEG Quality: 8 (high quality)\n");
-    Serial.printf("  Frame buffers: 2 in PSRAM\n");
+    Serial.printf("  Frame size: QVGA (320x240)\n");
+    Serial.printf("  JPEG Quality: 12\n");
+    Serial.printf("  Frame buffers: %d in %s\n",
+                  config.fb_count,
+                  psramFound() ? "PSRAM" : "DRAM");
 
     esp_err_t err = esp_camera_init(&config);
     if (err != ESP_OK) {
@@ -79,7 +73,7 @@ void ESP32CameraService::configPins() {
         } else if (err == ESP_ERR_NO_MEM) {
             Serial.println("[ERROR] Not enough memory for camera");
         }
-        return;
+        return false;
     }
 
     Serial.println("[INFO] Camera hardware initialized");
@@ -87,7 +81,8 @@ void ESP32CameraService::configPins() {
     sensor_t * s = esp_camera_sensor_get();
     if (!s) {
         Serial.println("[ERROR] Failed to get sensor");
-        return;
+        esp_camera_deinit();
+        return false;
     }
     
     Serial.println("[INFO] Sensor found, configuring...");
@@ -116,20 +111,12 @@ void ESP32CameraService::configPins() {
     s->set_colorbar(s, 0);
     
     Serial.println("[INFO] Sensor configured successfully");
-}
-
-void ESP32CameraService::configFrame() {
-    // Camera frame configuration is done in configPins()
+    return true;
 }
 
 bool ESP32CameraService::begin() {
     if (initialized) {
         return true;
-    }
-
-    if (!jpegBuffer) {
-        Serial.println("[ERROR] JPEG buffer not allocated");
-        return false;
     }
 
     Serial.println("[INFO] Initializing camera...");
@@ -141,7 +128,9 @@ bool ESP32CameraService::begin() {
         Serial.println("[WARNING] PSRAM not found - using internal RAM");
     }
     
-    configPins();
+    if (!configPins()) {
+        return false;
+    }
     
     // Give camera time to stabilize after init
     delay(1000);
@@ -186,8 +175,9 @@ size_t ESP32CameraService::captureJpeg(uint8_t* buffer, size_t maxSize) {
     }
 
     if (captureSize > maxSize) {
-        Serial.printf("[WARNING] Frame size %u exceeds buffer %u, truncating\n", captureSize, maxSize);
-        captureSize = maxSize;
+        Serial.printf("[ERROR] Frame size %u exceeds buffer %u\n", captureSize, maxSize);
+        esp_camera_fb_return(fb);
+        return 0;
     }
 
     memcpy(buffer, fb->buf, captureSize);
@@ -209,6 +199,6 @@ ESP32CameraService::CameraStatus ESP32CameraService::getStatus() const {
         initialized,
         320,   // QVGA width
         240,   // QVGA height
-        10     // JPEG quality
+        12     // JPEG quality
     };
 }

@@ -35,6 +35,7 @@ public:
      * @brief Constructor with dependency injection
      */
     AppController(IHttpClientService* httpClient, IDisplayService* display, IWiFiManager* wifiManager);
+    ~AppController();
 
     /**
      * @brief Initialize controller and set up dependencies

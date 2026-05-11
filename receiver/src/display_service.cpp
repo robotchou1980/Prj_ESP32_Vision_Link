@@ -48,8 +48,8 @@ bool ST7789DisplayService::initTFT() {
         Serial.println("[DEBUG] TFT begin() completed");
 
         delay(100);  // Small delay after init
-        tft.setRotation(0);  // Portrait mode
-        Serial.println("[DEBUG] Rotation set to 0 (portrait)");
+        tft.setRotation(2);  // Portrait mode, flipped 180 degrees from the original orientation
+        Serial.println("[DEBUG] Rotation set to 2");
         
         // Enable byte swap - important for proper color display
         tft.setSwapBytes(true);
@@ -112,9 +112,8 @@ bool ST7789DisplayService::displayJpegImage(const uint8_t* jpegData, size_t jpeg
 
     uint32_t startTime = millis();
 
-    // Draw JPEG directly from memory buffer
-    // TJpgDec.drawJpg requires address in memory, so we need to copy to PROGMEM or use a workaround
-    // For flash-based storage, we use drawJpg with proper positioning
+    // Match the original full-screen behavior: draw from the top-left and let
+    // TFT_eSPI/TJpg_Decoder clip any pixels outside the panel bounds.
     int16_t rc = TJpgDec.drawJpg(0, 0, (uint8_t*)jpegData, jpegSize);
     
     if (rc != 0) {

@@ -64,6 +64,11 @@ bool ESP32HttpServerService::begin(uint16_t port) {
         return false;
     }
 
+    if (!jpegCacheBuffer) {
+        Serial.println("[ERROR] Cannot start server without JPEG cache buffer");
+        return false;
+    }
+
     this->port = port;
     g_server = new WebServer(port);
     g_httpService = this;
@@ -134,6 +139,11 @@ void ESP32HttpServerService::handleRoot() {
 
 void ESP32HttpServerService::handleCapture() {
     if (!g_server || !camera) return;
+
+    if (!jpegCacheBuffer) {
+        g_server->send(500, "text/plain", "JPEG cache buffer unavailable");
+        return;
+    }
 
     s_totalRequests++;
     uint32_t startTime = millis();

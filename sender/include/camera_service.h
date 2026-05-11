@@ -1,8 +1,8 @@
 #ifndef CAMERA_SERVICE_H
 #define CAMERA_SERVICE_H
 
-#include <vector>
 #include <cstdint>
+#include <cstddef>
 
 /**
  * @brief Abstract interface for camera operations
@@ -37,19 +37,12 @@ public:
  */
 class ESP32CameraService : public ICameraService {
 private:
-    static const size_t JPEG_BUFFER_SIZE = 64 * 1024;  // 64KB for VGA JPEG
-    uint8_t* jpegBuffer;
     bool initialized;
 
     /**
      * @brief Configure camera pins for AI Thinker board
      */
-    void configPins();
-
-    /**
-     * @brief Configure camera frame settings
-     */
-    void configFrame();
+    bool configPins();
 
 public:
     ESP32CameraService();

@@ -52,11 +52,23 @@ private:
     uint32_t lastCaptureTime;      // Timestamp of last capture
     bool cacheValid;               // Whether cache has valid data
 
+#ifdef ENABLE_STREAM_MODE
+    static constexpr const char* STREAM_BOUNDARY = "frame";
+    static const uint32_t STREAM_FRAME_INTERVAL_MS = 150;  // Keep latency low by avoiding receiver backlog
+#endif
+
 public:
     /**
      * @brief Handle GET /capture request
      */
     void handleCapture();
+
+#ifdef ENABLE_STREAM_MODE
+    /**
+     * @brief Handle GET /stream request (MJPEG multipart stream)
+     */
+    void handleStream();
+#endif
 
     /**
      * @brief Handle GET / (root) request

@@ -14,6 +14,14 @@ void handleCaptureCallback() {
     }
 }
 
+#ifdef ENABLE_STREAM_MODE
+void handleStreamCallback() {
+    if (g_httpService) {
+        g_httpService->handleStream();
+    }
+}
+#endif
+
 void handleRootCallback() {
     if (g_httpService) {
         g_httpService->handleRoot();
@@ -76,6 +84,9 @@ bool ESP32HttpServerService::begin(uint16_t port) {
     // Register request handlers
     g_server->on("/", HTTP_GET, handleRootCallback);
     g_server->on("/capture", HTTP_GET, handleCaptureCallback);
+#ifdef ENABLE_STREAM_MODE
+    g_server->on("/stream", HTTP_GET, handleStreamCallback);
+#endif
     g_server->on("/status", HTTP_GET, handleStatusCallback);
     g_server->onNotFound(handleNotFoundCallback);
 
@@ -112,7 +123,9 @@ void ESP32HttpServerService::handleRoot() {
 
     s_totalRequests++;
     
-    const char* html = R"(
+    const char* html =
+#ifdef ENABLE_STREAM_MODE
+    R"html(
     <html>
     <head>
         <title>ESP32-CAM Server</title>
@@ -120,7 +133,29 @@ void ESP32HttpServerService::handleRoot() {
         <style>
             body { font-family: Arial; text-align: center; margin: 20px; }
             img { max-width: 100%; margin: 20px 0; }
-            a { background: #0066cc; color: white; padding: 10px 20px; 
+            a { background: #0066cc; color: white; padding: 10px 20px;
+                text-decoration: none; border-radius: 5px; display: inline-block; }
+        </style>
+    </head>
+    <body>
+        <h1>ESP32-CAM Server</h1>
+        <p>MJPEG Stream Feed</p>
+        <img src="/stream" style="width: 100%; max-width: 320px;">
+        <br>
+        <a href="/capture">Download Latest Image</a>
+    </body>
+    </html>
+    )html";
+#else
+    R"html(
+    <html>
+    <head>
+        <title>ESP32-CAM Server</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            body { font-family: Arial; text-align: center; margin: 20px; }
+            img { max-width: 100%; margin: 20px 0; }
+            a { background: #0066cc; color: white; padding: 10px 20px;
                 text-decoration: none; border-radius: 5px; display: inline-block; }
         </style>
     </head>
@@ -132,7 +167,8 @@ void ESP32HttpServerService::handleRoot() {
         <a href="/capture">Download Latest Image</a>
     </body>
     </html>
-    )";
+    )html";
+#endif
 
     g_server->send(200, "text/html", html);
 }
@@ -195,6 +231,58 @@ void ESP32HttpServerService::handleCapture() {
                       jpegSize, s_lastResponseTime);
     }
 }
+
+#ifdef ENABLE_STREAM_MODE
+void ESP32HttpServerService::handleStream() {
+    if (!g_server || !camera) return;
+
+    if (!jpegCacheBuffer) {
+        g_server->send(500, "text/plain", "JPEG cache buffer unavailable");
+        return;
+    }
+
+    s_totalRequests++;
+    WiFiClient client = g_server->client();
+
+    client.println("HTTP/1.1 200 OK");
+    client.println("Content-Type: multipart/x-mixed-replace; boundary=frame");
+    client.println("Cache-Control: no-cache");
+    client.println("Connection: close");
+    client.println();
+
+    Serial.println("[STREAM] MJPEG stream client connected");
+
+    while (client.connected()) {
+        uint32_t frameStart = millis();
+        size_t jpegSize = camera->captureJpeg(jpegCacheBuffer, JPEG_BUFFER_SIZE);
+
+        if (jpegSize == 0) {
+            s_failedCaptures++;
+            Serial.println("[STREAM] Failed to capture stream frame");
+            break;
+        }
+
+        client.printf("--%s\r\n", STREAM_BOUNDARY);
+        client.println("Content-Type: image/jpeg");
+        client.printf("Content-Length: %u\r\n\r\n", (unsigned int)jpegSize);
+        client.write((const uint8_t*)jpegCacheBuffer, jpegSize);
+        client.print("\r\n");
+
+        s_successfulCaptures++;
+        s_lastResponseTime = millis() - frameStart;
+
+        uint32_t elapsed = millis() - frameStart;
+        if (elapsed < STREAM_FRAME_INTERVAL_MS) {
+            delay(STREAM_FRAME_INTERVAL_MS - elapsed);
+        } else {
+            yield();
+        }
+    }
+
+    client.stop();
+    Serial.println("[STREAM] MJPEG stream client disconnected");
+}
+#endif
 
 void ESP32HttpServerService::handleNotFound() {
     if (!g_server) return;

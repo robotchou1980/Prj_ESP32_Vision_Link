@@ -3,6 +3,7 @@
 #include <WiFi.h>
 #include <Arduino.h>
 #include <string.h>
+#include <stdlib.h>
 
 // Static tracking for statistics
 static uint32_t s_totalRequests = 0;
@@ -12,10 +13,19 @@ static uint32_t s_lastResponseTime = 0;
 static uint32_t s_totalBytesReceived = 0;
 
 ESP32HttpClientService::ESP32HttpClientService()
-    : lastRequestSuccess(false), lastHttpCode(0), lastErrorMessage("") {
+    : lastRequestSuccess(false), lastHttpCode(0), lastErrorMessage("")
+#ifdef ENABLE_STREAM_MODE
+      , streamActive(false), activeStreamUrl("")
+#endif
+{
 }
 
 ESP32HttpClientService::~ESP32HttpClientService() {
+#ifdef ENABLE_STREAM_MODE
+    closeStream();
+#else
+    http.end();
+#endif
 }
 
 bool ESP32HttpClientService::isValidJpegHeader(const uint8_t* buffer, size_t size) const {
@@ -30,12 +40,214 @@ bool ESP32HttpClientService::isValidJpegFooter(const uint8_t* buffer, size_t siz
     return (buffer[size - 2] == 0xFF && buffer[size - 1] == 0xD9);
 }
 
+#ifdef ENABLE_STREAM_MODE
+bool ESP32HttpClientService::beginStream(const char* url, uint32_t timeoutMs) {
+    if (streamActive && activeStreamUrl == url && http.connected()) {
+        return true;
+    }
+
+    closeStream();
+
+    http.setConnectTimeout(2000);
+    http.setTimeout(timeoutMs);
+
+    Serial.printf("[STREAM] Connecting to: %s\n", url);
+
+    if (!http.begin(url)) {
+        lastErrorMessage = "Failed to begin stream request";
+        lastHttpCode = -1;
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    http.addHeader("User-Agent", "ESP32-StreamClient");
+
+    int httpCode = http.GET();
+    lastHttpCode = httpCode;
+
+    if (httpCode != HTTP_CODE_OK) {
+        char errorMsg[64];
+        snprintf(errorMsg, sizeof(errorMsg), "Stream HTTP Error: %d", httpCode);
+        lastErrorMessage = errorMsg;
+        lastRequestSuccess = false;
+        http.end();
+        return false;
+    }
+
+    streamActive = true;
+    activeStreamUrl = url;
+    Serial.println("[STREAM] Connected");
+    return true;
+}
+
+void ESP32HttpClientService::closeStream() {
+    if (streamActive) {
+        WiFiClient* stream = http.getStreamPtr();
+        if (stream) {
+            stream->stop();
+        }
+    }
+
+    http.end();
+    streamActive = false;
+    activeStreamUrl = "";
+}
+
+bool ESP32HttpClientService::readLine(WiFiClient* stream, char* line, size_t maxLen, uint32_t timeoutMs) {
+    if (!stream || !line || maxLen == 0) return false;
+
+    size_t pos = 0;
+    uint32_t startTime = millis();
+
+    while ((millis() - startTime) < timeoutMs) {
+        if (stream->available() > 0) {
+            int c = stream->read();
+            if (c < 0) {
+                yield();
+                continue;
+            }
+
+            if (c == '\n') {
+                line[pos] = '\0';
+                return true;
+            }
+
+            if (c != '\r' && pos < maxLen - 1) {
+                line[pos++] = (char)c;
+            }
+        } else if (!http.connected()) {
+            line[pos] = '\0';
+            return pos > 0;
+        } else {
+            yield();
+        }
+    }
+
+    line[pos] = '\0';
+    return false;
+}
+
+bool ESP32HttpClientService::readExact(WiFiClient* stream, uint8_t* buffer, size_t length, uint32_t timeoutMs) {
+    if (!stream || !buffer) return false;
+
+    size_t bytesRead = 0;
+    uint32_t startTime = millis();
+
+    while (bytesRead < length && (millis() - startTime) < timeoutMs) {
+        if (stream->available() > 0) {
+            size_t avail = (size_t)stream->available();
+            size_t remaining = length - bytesRead;
+            size_t toRead = avail < remaining ? avail : remaining;
+            size_t chunkSize = stream->readBytes(buffer + bytesRead, toRead);
+
+            if (chunkSize > 0) {
+                bytesRead += chunkSize;
+                startTime = millis();
+            }
+        } else if (!http.connected()) {
+            break;
+        } else {
+            yield();
+        }
+    }
+
+    return bytesRead == length;
+}
+
+bool ESP32HttpClientService::readStreamFrame(WiFiClient* stream, uint8_t* buffer, size_t maxSize, size_t& frameSize, uint32_t timeoutMs) {
+    frameSize = 0;
+
+    char line[128];
+    bool boundaryFound = false;
+    uint32_t startTime = millis();
+
+    while ((millis() - startTime) < timeoutMs) {
+        if (!readLine(stream, line, sizeof(line), timeoutMs)) {
+            break;
+        }
+
+        if (line[0] == '\0') {
+            continue;
+        }
+
+        if (strncmp(line, "--frame", 7) == 0) {
+            boundaryFound = true;
+            break;
+        }
+    }
+
+    if (!boundaryFound) {
+        lastErrorMessage = "Stream boundary not found";
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    size_t contentLength = 0;
+    bool headersComplete = false;
+    startTime = millis();
+
+    while ((millis() - startTime) < timeoutMs) {
+        if (!readLine(stream, line, sizeof(line), timeoutMs)) {
+            break;
+        }
+
+        if (line[0] == '\0') {
+            headersComplete = true;
+            break;
+        }
+
+        if (strncmp(line, "Content-Length:", 15) == 0) {
+            contentLength = (size_t)atoi(line + 15);
+        }
+    }
+
+    if (!headersComplete || contentLength == 0) {
+        lastErrorMessage = "Invalid stream frame headers";
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    if (contentLength > maxSize) {
+        char errorMsg[64];
+        snprintf(errorMsg, sizeof(errorMsg), "Stream frame too large: %u", (unsigned int)contentLength);
+        lastErrorMessage = errorMsg;
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    if (!readExact(stream, buffer, contentLength, timeoutMs)) {
+        lastErrorMessage = "Stream frame read timeout";
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    if (!isValidJpegHeader(buffer, contentLength)) {
+        lastErrorMessage = "Invalid stream JPEG header";
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    if (!isValidJpegFooter(buffer, contentLength)) {
+        lastErrorMessage = "Invalid stream JPEG footer";
+        lastRequestSuccess = false;
+        return false;
+    }
+
+    frameSize = contentLength;
+    return true;
+}
+#endif
+
 size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_t maxSize, uint32_t timeoutMs) {
     if (!url || !buffer || maxSize == 0) {
         lastErrorMessage = "Invalid parameters";
         lastRequestSuccess = false;
         return 0;
     }
+
+#ifdef ENABLE_STREAM_MODE
+    closeStream();
+#endif
 
     s_totalRequests++;
     uint32_t startTime = millis();
@@ -177,6 +389,71 @@ size_t ESP32HttpClientService::fetchJpeg(const char* url, uint8_t* buffer, size_
     Serial.printf("[INFO] Fetched JPEG: %u bytes in %u ms\n", bytesReceived, s_lastResponseTime);
     return bytesReceived;
 }
+
+#ifdef ENABLE_STREAM_MODE
+size_t ESP32HttpClientService::fetchStreamJpegFrame(const char* url, uint8_t* buffer, size_t maxSize, uint32_t timeoutMs) {
+    if (!url || !buffer || maxSize == 0) {
+        lastErrorMessage = "Invalid parameters";
+        lastRequestSuccess = false;
+        return 0;
+    }
+
+    s_totalRequests++;
+    uint32_t startTime = millis();
+
+    if (!beginStream(url, timeoutMs)) {
+        s_failedFetches++;
+        return 0;
+    }
+
+    WiFiClient* stream = http.getStreamPtr();
+    if (!stream) {
+        lastErrorMessage = "Failed to get stream";
+        lastRequestSuccess = false;
+        s_failedFetches++;
+        closeStream();
+        return 0;
+    }
+
+    const size_t BACKLOG_THRESHOLD_BYTES = 512;
+    const uint8_t MAX_STALE_FRAMES_TO_DROP = 5;
+    size_t contentLength = 0;
+    uint8_t droppedFrames = 0;
+
+    do {
+        if (!readStreamFrame(stream, buffer, maxSize, contentLength, timeoutMs)) {
+            s_failedFetches++;
+            closeStream();
+            return 0;
+        }
+
+        // The TFT decode/display path is slower than the camera stream. If TCP
+        // already has another frame queued, overwrite this older frame and catch
+        // up so the screen shows the freshest available image.
+        int queuedBytes = stream->available();
+        if (queuedBytes < (int)BACKLOG_THRESHOLD_BYTES || droppedFrames >= MAX_STALE_FRAMES_TO_DROP) {
+            break;
+        }
+
+        droppedFrames++;
+        yield();
+    } while ((millis() - startTime) < timeoutMs);
+
+    s_successfulFetches++;
+    s_totalBytesReceived += contentLength;
+    s_lastResponseTime = millis() - startTime;
+    lastRequestSuccess = true;
+    lastErrorMessage = "";
+
+    if (droppedFrames > 0) {
+        Serial.printf("[STREAM] Fetched latest frame: %u bytes in %u ms (dropped %u stale)\n",
+                      (unsigned int)contentLength, s_lastResponseTime, droppedFrames);
+    } else {
+        Serial.printf("[STREAM] Fetched frame: %u bytes in %u ms\n", (unsigned int)contentLength, s_lastResponseTime);
+    }
+    return contentLength;
+}
+#endif
 
 bool ESP32HttpClientService::getLastRequestStatus() const {
     return lastRequestSuccess;

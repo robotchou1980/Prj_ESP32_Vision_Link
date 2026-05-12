@@ -37,36 +37,38 @@ void printMemoryStats() {
     uint32_t freeHeap = esp_get_free_heap_size();
     uint32_t minFreeHeap = esp_get_minimum_free_heap_size();
     uint32_t totalHeap = ESP.getHeapSize();
-    
-    Serial.printf("[MEM] Heap: %u/%u bytes | Min Free: %u bytes\n", 
+
+    Serial.printf("[MEM] Heap: %u/%u bytes | Min Free: %u bytes\n",
                   totalHeap - freeHeap, totalHeap, minFreeHeap);
 }
 
 void printSystemStatus() {
     Serial.println("\n========== SYSTEM STATUS ==========");
-    
-    // WiFi Status
+
     if (wifiManager && wifiManager->isConnected()) {
         Serial.printf("[WIFI] Connected - IP: %s\n", wifiManager->getLocalIP().c_str());
     } else {
         Serial.println("[WIFI] Disconnected");
     }
-    
-    // Camera Status
+
     if (cameraService) {
         Serial.println("[CAMERA] Initialized and ready");
     } else {
         Serial.println("[CAMERA] Not initialized");
     }
-    
-    // HTTP Server Status
+
     if (httpServer && httpServer->isRunning()) {
         Serial.printf("[HTTP] Server running on port %d\n", HTTP_PORT);
         Serial.printf("       Access at: http://%s\n", wifiManager ? wifiManager->getLocalIP().c_str() : "192.168.x.x");
+#ifdef ENABLE_STREAM_MODE
+        Serial.println("       Stream: /stream | Snapshot: /capture");
+#else
+        Serial.println("       Snapshot: /capture");
+#endif
     } else {
         Serial.println("[HTTP] Server not running");
     }
-    
+
     printMemoryStats();
     Serial.println("===================================\n");
 }
@@ -76,33 +78,33 @@ void printSystemStatus() {
 // ============================================================================
 void setup() {
     delay(1500);  // Wait for serial port to be ready
-    
-    // Initialize Serial
+
     Serial.begin(115200);
     delay(500);
-    
-    // Clear initial garbage
+
     for (int i = 0; i < 10; i++) {
         Serial.println();
         delay(50);
     }
-    
+
     Serial.println("\n\n");
-    Serial.println("╔════════════════════════════════════════╗");
-    Serial.println("║     ESP32 CAMERA WEB STREAMING         ║");
-    Serial.println("║  - WiFi: ENABLED                       ║");
-    Serial.println("║  - Camera: ENABLED                     ║");
-    Serial.println("║  - HTTP Server: ENABLED               ║");
-    Serial.println("╚════════════════════════════════════════╝");
+    Serial.println("========================================");
+    Serial.println("ESP32 CAMERA SERVER");
+    Serial.println("- WiFi: ENABLED");
+    Serial.println("- Camera: ENABLED");
+#ifdef ENABLE_STREAM_MODE
+    Serial.println("- HTTP Mode: MJPEG STREAM (/stream + /capture)");
+#else
+    Serial.println("- HTTP Mode: SINGLE PHOTO (/capture)");
+#endif
+    Serial.println("========================================");
     Serial.println();
-    
+
     printDeviceInfo();
-    
-    // Initialize WiFi Manager
+
     Serial.println("\n[INIT] Initializing WiFi Manager...");
     wifiManager = new ESP32WiFiManager();
-    
-    // Start WiFi AP (Access Point mode)
+
     Serial.printf("[INIT] Starting WiFi AP: %s\n", WIFI_SSID);
     if (!wifiManager->startAP(WIFI_SSID, WIFI_PASSWORD, WIFI_CHANNEL)) {
         Serial.println("[ERROR] Failed to start WiFi AP!");
@@ -110,8 +112,7 @@ void setup() {
     } else {
         Serial.printf("[OK] WiFi AP started! IP: %s\n", wifiManager->getLocalIP().c_str());
     }
-    
-    // Initialize Camera Service
+
     Serial.println("\n[INIT] Initializing Camera Service...");
     cameraService = new ESP32CameraService();
     if (!cameraService->begin()) {
@@ -121,8 +122,7 @@ void setup() {
     } else {
         Serial.println("[OK] Camera initialized successfully");
     }
-    
-    // Initialize HTTP Server
+
     if (cameraService) {
         delay(100);  // Give WiFi/AP time to stabilize
         Serial.println("\n[INIT] Initializing HTTP Server...");
@@ -142,7 +142,7 @@ void setup() {
     } else {
         Serial.println("[WARNING] Skipping HTTP Server - Camera not available");
     }
-    
+
     Serial.println("\n[OK] Setup completed successfully\n");
     printSystemStatus();
     Serial.flush();
@@ -152,22 +152,19 @@ void setup() {
 // Main Loop - Handle client requests and display status
 // ============================================================================
 void loop() {
-    // Handle HTTP client requests if server is running
     if (httpServer && httpServer->isRunning()) {
         httpServer->handleClient();
     }
-    
-    // Display system status periodically
+
     unsigned long now = millis();
     if (now - lastStatusDisplay >= STATUS_DISPLAY_INTERVAL) {
         printSystemStatus();
         lastStatusDisplay = now;
     }
-    
-    // Check WiFi connection
+
     if (wifiManager && !wifiManager->isConnected()) {
         Serial.println("[WARNING] WiFi connection lost!");
     }
-    
+
     delay(10);  // Small delay to prevent watchdog timeout
 }

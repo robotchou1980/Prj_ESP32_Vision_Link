@@ -164,7 +164,11 @@ void AppController::handleIdle() {
 }
 
 void AppController::handleFetchImage() {
+#ifdef ENABLE_STREAM_MODE
+    jpegSize = httpClient->fetchStreamJpegFrame(serverUrl, jpegBuffer, MAX_JPEG_SIZE, HTTP_TIMEOUT);
+#else
     jpegSize = httpClient->fetchJpeg(serverUrl, jpegBuffer, MAX_JPEG_SIZE, HTTP_TIMEOUT);
+#endif
 
     if (jpegSize == 0) {
         display->showStatus(httpClient->getLastErrorMessage().c_str());
@@ -184,7 +188,9 @@ void AppController::handleDecode() {
 }
 
 void AppController::handleDisplay() {
+#ifndef ENABLE_STREAM_MODE
     display->showStatus("Displaying...");
+#endif
     
     if (!display->displayJpegImage(jpegBuffer, jpegSize)) {
         setError("Display failed");

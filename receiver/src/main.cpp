@@ -13,7 +13,11 @@ const char* WIFI_SSID     = "ESP32-AP";       // SENDER 的 AP 名稱
 const char* WIFI_PASSWORD = "12345678";       // SENDER 的 AP 密碼
 
 // Camera server URL - SENDER 的 IP 與端口
-const char* CAMERA_SERVER_URL = "http://192.168.4.1:80/capture";  // SENDER AP IP:PORT/capture
+#ifdef ENABLE_STREAM_MODE
+const char* CAMERA_SERVER_URL = "http://192.168.4.1:80/stream";
+#else
+const char* CAMERA_SERVER_URL = "http://192.168.4.1:80/capture";
+#endif
 
 // ============================================================================
 
